@@ -17,9 +17,14 @@ import {
   OnNodeDrag,
   FitViewOptions,
   DefaultEdgeOptions,
-  NodeTypes,
   ReactFlowInstance,
   Panel,
+  useNodesState,
+  useEdgesState,
+  NodeTypes,
+  MiniMap,
+  Handle,
+  Position,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -53,21 +58,54 @@ import {
 // Custom node component
 const CustomNode = ({
   data,
+  isConnectable,
 }: {
   data: { label: string; description?: string; type?: string };
+  isConnectable: boolean;
 }) => {
   return (
-    <div className="custom-node bg-white border border-gray-200 rounded-md shadow-sm p-3 min-w-[150px]">
-      <div className="font-medium text-sm">{data.label}</div>
-      {data.description && (
-        <div className="text-xs text-gray-500 mt-1">{data.description}</div>
-      )}
-      {data.type && (
-        <div className="text-xs mt-2 inline-block px-2 py-1 bg-gray-100 rounded-full">
-          {data.type}
-        </div>
-      )}
-    </div>
+    <>
+      <Handle
+        type="target"
+        position={Position.Top}
+        onConnect={(params) => console.log("handle onConnect", params)}
+        isConnectable={isConnectable}
+      />
+      <Handle
+        type="target"
+        position={Position.Bottom}
+        onConnect={(params) => console.log("handle onConnect", params)}
+        isConnectable={isConnectable}
+      />
+      <div className="custom-node bg-white border border-gray-200 rounded-md shadow-sm p-3 min-w-[150px]">
+        <div className="font-medium text-sm">{data.label}</div>
+        {data.description && (
+          <div className="text-xs text-gray-500 mt-1">{data.description}</div>
+        )}
+        {data.type && (
+          <div
+            className={`text-xs text-gray-400 mt-1 rounded-md px-2 py-1 bg-gray-100 
+              ${data.type === "Output" ? "!bg-[#10b981] text-white" : ""}  
+              ${data.type === "Process" ? "!bg-[#4299e1] text-white" : ""} 
+              ${data.type === "Decision" ? "!bg-[#f59e0b] text-white" : ""}`}
+          >
+            {data.type}
+          </div>
+        )}
+      </div>
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="a"
+        isConnectable={isConnectable}
+      />
+      <Handle
+        id="b"
+        type="source"
+        position={Position.Left}
+        isConnectable={isConnectable}
+      />
+    </>
   );
 };
 
@@ -102,7 +140,7 @@ export default function FlowEditor() {
     useState<ReactFlowInstance | null>(null);
 
   // Node and edge state
-  const [nodes, setNodes] = useState<Node[]>([
+  const [nodes, setNodes] = useNodesState<Node>([
     {
       id: "1",
       data: {
@@ -125,9 +163,7 @@ export default function FlowEditor() {
     },
   ]);
 
-  const [edges, setEdges] = useState<Edge[]>([
-    { id: "e1-2", source: "1", target: "2", animated: true },
-  ]);
+  const [edges, setEdges] = useEdgesState<Edge>([]);
 
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [nodeFormOpen, setNodeFormOpen] = useState(false);
@@ -138,6 +174,9 @@ export default function FlowEditor() {
     type: "Process",
   });
 
+  const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  const [edgeFormOpen, setEdgeFormOpen] = useState(false);
+
   // Flow configuration options
   const fitViewOptions: FitViewOptions = {
     padding: 0.2,
@@ -145,27 +184,41 @@ export default function FlowEditor() {
 
   const defaultEdgeOptions: DefaultEdgeOptions = {
     animated: true,
+    type: "smoothstep",
+    style: { strokeWidth: 2, stroke: "#4a5568" },
   };
 
   // Event handlers
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
-    []
+    [setNodes]
   );
 
   const onEdgesChange: OnEdgesChange = useCallback(
     (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
-    []
+    [setEdges]
   );
 
   const onConnect: OnConnect = useCallback(
-    (connection) => setEdges((eds) => addEdge(connection, eds)),
+    (connection) => {
+      const newConnection = {
+        ...connection,
+        type: "smoothstep",
+        animated: true,
+      };
+      return setEdges((eds) => addEdge(newConnection, eds));
+    },
     [setEdges]
   );
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedNode(node);
     setNodeFormOpen(true);
+  }, []);
+
+  const onEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
+    setSelectedEdge(edge);
+    setEdgeFormOpen(true);
   }, []);
 
   const onNodeDrag: OnNodeDrag = (_, node) => {
@@ -200,7 +253,7 @@ export default function FlowEditor() {
       description: "Example description",
       type: "Process",
     });
-  }, [reactFlowInstance, nodes.length, newNodeData]);
+  }, [reactFlowInstance, nodes.length, newNodeData, setNodes]);
 
   // Remove selected node
   const removeNode = useCallback(() => {
@@ -216,7 +269,7 @@ export default function FlowEditor() {
 
     setSelectedNode(null);
     setNodeFormOpen(false);
-  }, [selectedNode]);
+  }, [selectedNode, setEdges, setNodes]);
 
   // Update node data
   const updateNodeData = useCallback(() => {
@@ -237,7 +290,33 @@ export default function FlowEditor() {
     );
 
     setNodeFormOpen(false);
-  }, [selectedNode]);
+  }, [selectedNode, setNodes]);
+
+  const updateEdgeData = useCallback(() => {
+    if (!selectedEdge) return;
+
+    setEdges((eds) =>
+      eds.map((edge) => {
+        if (edge.id === selectedEdge.id) {
+          return {
+            ...selectedEdge,
+          };
+        }
+        return edge;
+      })
+    );
+
+    setEdgeFormOpen(false);
+  }, [selectedEdge, setEdges]);
+
+  const removeEdge = useCallback(() => {
+    if (!selectedEdge) return;
+
+    setEdges((edges) => edges.filter((edge) => edge.id !== selectedEdge.id));
+
+    setSelectedEdge(null);
+    setEdgeFormOpen(false);
+  }, [selectedEdge, setEdges]);
 
   return (
     <div className="grid grid-rows-[auto_1fr_auto] min-h-screen p-6">
@@ -277,9 +356,10 @@ export default function FlowEditor() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={onNodeClick}
+          onEdgeClick={onEdgeClick}
           onNodeDrag={onNodeDrag}
           onInit={onInit}
-          fitView
+          // fitView
           fitViewOptions={fitViewOptions}
           defaultEdgeOptions={defaultEdgeOptions}
           nodeTypes={nodeTypes}
@@ -290,7 +370,7 @@ export default function FlowEditor() {
             position="top-left"
             className="bg-white p-2 rounded-md shadow-sm"
           >
-            <div className="text-sm font-medium mb-2">Node Types</div>
+            <h1 className="font-medium mb-2">Node Types</h1>
             <div className="flex flex-col gap-2">
               {nodeTemplates.map((template, i) => (
                 <TooltipProvider key={i}>
@@ -322,6 +402,7 @@ export default function FlowEditor() {
               ))}
             </div>
           </Panel>
+          <MiniMap />
         </ReactFlow>
       </div>
 
@@ -475,6 +556,142 @@ export default function FlowEditor() {
           </div>
           <DialogFooter>
             <Button onClick={addNode}>Add Node</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edge Form Dialog */}
+      <Dialog open={edgeFormOpen} onOpenChange={setEdgeFormOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit Edge</DialogTitle>
+            <DialogDescription>
+              Customize the properties of this connection.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedEdge && (
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edgeLabel" className="text-right">
+                  Label
+                </Label>
+                <Input
+                  id="edgeLabel"
+                  value={(selectedEdge.data?.label as string) || ""}
+                  className="col-span-3"
+                  onChange={(e) =>
+                    setSelectedEdge({
+                      ...selectedEdge,
+                      data: { ...selectedEdge.data, label: e.target.value },
+                    })
+                  }
+                />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edgeType" className="text-right">
+                  Edge Type
+                </Label>
+                <Select
+                  value={selectedEdge.type || "smoothstep"}
+                  onValueChange={(value) =>
+                    setSelectedEdge({
+                      ...selectedEdge,
+                      type: value,
+                    })
+                  }
+                >
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select edge type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="smoothstep">Smooth Step</SelectItem>
+                    <SelectItem value="step">Step</SelectItem>
+                    <SelectItem value="straight">Straight</SelectItem>
+                    <SelectItem value="bezier">Bezier</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edgeStyle" className="text-right">
+                  Stroke Width
+                </Label>
+                <Select
+                  value={String(selectedEdge.style?.strokeWidth || "2")}
+                  onValueChange={(value) =>
+                    setSelectedEdge({
+                      ...selectedEdge,
+                      style: {
+                        ...selectedEdge.style,
+                        strokeWidth: parseInt(value),
+                      },
+                    })
+                  }
+                >
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select stroke width" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Thin (1px)</SelectItem>
+                    <SelectItem value="2">Normal (2px)</SelectItem>
+                    <SelectItem value="3">Medium (3px)</SelectItem>
+                    <SelectItem value="4">Thick (4px)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edgeColor" className="text-right">
+                  Color
+                </Label>
+                <Select
+                  value={selectedEdge.style?.stroke || "#4a5568"}
+                  onValueChange={(value) =>
+                    setSelectedEdge({
+                      ...selectedEdge,
+                      style: {
+                        ...selectedEdge.style,
+                        stroke: value,
+                      },
+                    })
+                  }
+                >
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select color" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="#4a5568">Gray</SelectItem>
+                    <SelectItem value="#3182ce">Blue</SelectItem>
+                    <SelectItem value="#dd6b20">Orange</SelectItem>
+                    <SelectItem value="#38a169">Green</SelectItem>
+                    <SelectItem value="#e53e3e">Red</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edgeAnimated" className="text-right">
+                  Animated
+                </Label>
+                <div className="col-span-3 flex items-center">
+                  <input
+                    type="checkbox"
+                    id="edgeAnimated"
+                    checked={selectedEdge.animated || false}
+                    onChange={(e) =>
+                      setSelectedEdge({
+                        ...selectedEdge,
+                        animated: e.target.checked,
+                      })
+                    }
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="flex justify-between">
+            <Button variant="destructive" onClick={removeEdge}>
+              Delete Edge
+            </Button>
+            <Button onClick={updateEdgeData}>Save Changes</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
